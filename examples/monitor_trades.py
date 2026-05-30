@@ -204,6 +204,29 @@ def morning_summary(trades: list[dict], prices: dict) -> None:
     print("  Morning summary email sent.")
 
 
+def send_test_email(trades: list[dict]) -> None:
+    body = f"""
+✅ Kronos Monitor is live and working!
+
+This is a test email confirming your trade monitor is running on Railway.
+
+Watching these positions (expiry {trades[0]['expiry']}):
+"""
+    for t in trades:
+        body += f"  {t['ticker']:<6}  safe zone: ${t['sell_put']:.2f} – ${t['sell_call']:.2f}\n"
+
+    body += f"""
+You'll receive:
+  📊 Morning summary every trading day at 9:30am ET
+  ⚠️  Warning if any stock gets within $2 of a strike
+  🚨 Critical alert if any stock gets within $1 — close immediately
+
+To update next week's strikes, go to Railway → Variables and edit TRADE_1 through TRADE_5.
+"""
+    ok = send_email("✅ Kronos Monitor is live!", body)
+    print(f"  Test email {'sent ✉' if ok else 'FAILED — check EMAIL_APP_PASSWORD'}")
+
+
 def run():
     trades = _load_trades()
 
@@ -216,6 +239,10 @@ def run():
     if not APP_PASSWORD:
         print(f"\n  ⚠  EMAIL_APP_PASSWORD not set — alerts will log here only.")
     print(f"{'='*60}\n")
+
+    if os.environ.get("SEND_TEST_EMAIL", "").lower() == "true":
+        print("  Sending test email…")
+        send_test_email(trades)
 
     morning_sent_date = None
 
