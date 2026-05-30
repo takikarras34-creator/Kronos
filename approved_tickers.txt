@@ -1,0 +1,23 @@
+# Kronos Approved Ticker List
+# Filtered to top 50% by realistic P&L — backtest 2022-01-01 to 2026-05-30
+# Ranked by realistic fill P&L (bid prices + fees, 2747 trades)
+
+# ── Tier 1 — Index ETFs (90% fill rate) ───────────────────────────
+SPY
+QQQ
+
+# ── Tier 2 — Mega-cap tech (82% fill rate) ────────────────────────
+META
+MSFT
+AAPL
+AMZN
+GOOG
+AMD
+TSLA
+NVDA
+
+# ── Tier 3 — Growth / mid-cap (74% fill rate) ─────────────────────
+RDDT
+DASH
+ANET
+CRM

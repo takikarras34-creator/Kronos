@@ -386,7 +386,7 @@ def sample_from_logits(logits, temperature=1.0, top_k=None, top_p=None, sample_l
     return x
 
 
-def auto_regressive_inference(tokenizer, model, x, x_stamp, y_stamp, max_context, pred_len, clip=5, T=1.0, top_k=0, top_p=0.99, sample_count=5, verbose=False):
+def auto_regressive_inference(tokenizer, model, x, x_stamp, y_stamp, max_context, pred_len, clip=5, T=1.0, top_k=0, top_p=0.99, sample_count=5, verbose=False, return_samples=False):
     with torch.no_grad():
         x = torch.clip(x, -clip, clip)
 
@@ -464,8 +464,11 @@ def auto_regressive_inference(tokenizer, model, x, x_stamp, y_stamp, max_context
         z = tokenizer.decode(input_tokens, half=True)
         z = z.reshape(-1, sample_count, z.size(1), z.size(2))
         preds = z.cpu().numpy()
-        preds = np.mean(preds, axis=1)
 
+        if return_samples:
+            return preds  # (batch, sample_count, seq_len, features)
+
+        preds = np.median(preds, axis=1)
         return preds
 
 
@@ -505,6 +508,61 @@ class KronosPredictor:
         self.tokenizer = self.tokenizer.to(self.device)
         self.model = self.model.to(self.device)
 
+    def generate_with_confidence(self, x, x_stamp, y_stamp, pred_len, T, top_k, top_p, sample_count, verbose):
+        x_tensor      = torch.from_numpy(np.array(x).astype(np.float32)).to(self.device)
+        x_stamp_tensor = torch.from_numpy(np.array(x_stamp).astype(np.float32)).to(self.device)
+        y_stamp_tensor = torch.from_numpy(np.array(y_stamp).astype(np.float32)).to(self.device)
+        # returns (batch, sample_count, seq_len, features)
+        samples = auto_regressive_inference(
+            self.tokenizer, self.model, x_tensor, x_stamp_tensor, y_stamp_tensor,
+            self.max_context, pred_len, self.clip, T, top_k, top_p, sample_count, verbose,
+            return_samples=True,
+        )
+        return samples[:, :, -pred_len:, :]
+
+    def predict_with_confidence(self, df, x_timestamp, y_timestamp, pred_len,
+                                T=0.7, top_k=0, top_p=0.9, sample_count=20, verbose=True,
+                                lo_pct=10, hi_pct=90):
+        """Like predict(), but also returns low/high confidence band columns."""
+        if not isinstance(df, pd.DataFrame):
+            raise ValueError("Input must be a pandas DataFrame.")
+        if not all(col in df.columns for col in self.price_cols):
+            raise ValueError(f"Price columns {self.price_cols} not found in DataFrame.")
+
+        df = df.copy()
+        if self.vol_col not in df.columns:
+            df[self.vol_col] = 0.0
+            df[self.amt_vol] = 0.0
+        if self.amt_vol not in df.columns and self.vol_col in df.columns:
+            df[self.amt_vol] = df[self.vol_col] * df[self.price_cols].mean(axis=1)
+
+        x = df[self.price_cols + [self.vol_col, self.amt_vol]].values.astype(np.float32)
+        norm_window = min(60, len(x))
+        x_mean = np.mean(x[-norm_window:], axis=0)
+        x_std  = np.std(x[-norm_window:], axis=0)
+        x_norm = np.clip((x - x_mean) / (x_std + 1e-5), -self.clip, self.clip)
+
+        x_stamp = calc_time_stamps(x_timestamp).values.astype(np.float32)
+        y_stamp = calc_time_stamps(y_timestamp).values.astype(np.float32)
+
+        samples = self.generate_with_confidence(
+            x_norm[np.newaxis], x_stamp[np.newaxis], y_stamp[np.newaxis],
+            pred_len, T, top_k, top_p, sample_count, verbose,
+        )  # (1, sample_count, pred_len, features)
+        samples = samples[0]  # (sample_count, pred_len, features)
+        samples = samples * (x_std + 1e-5) + x_mean  # denormalise each sample
+
+        median = np.median(samples, axis=0)
+        lo     = np.percentile(samples, lo_pct, axis=0)
+        hi     = np.percentile(samples, hi_pct, axis=0)
+
+        cols = self.price_cols + [self.vol_col, self.amt_vol]
+        pred_df = pd.DataFrame(median, columns=cols, index=y_timestamp)
+        for i, col in enumerate(cols):
+            pred_df[f"{col}_lo"] = lo[:, i]
+            pred_df[f"{col}_hi"] = hi[:, i]
+        return pred_df
+
     def generate(self, x, x_stamp, y_stamp, pred_len, T, top_k, top_p, sample_count, verbose):
 
         x_tensor = torch.from_numpy(np.array(x).astype(np.float32)).to(self.device)
@@ -541,7 +599,9 @@ class KronosPredictor:
         x_stamp = x_time_df.values.astype(np.float32)
         y_stamp = y_time_df.values.astype(np.float32)
 
-        x_mean, x_std = np.mean(x, axis=0), np.std(x, axis=0)
+        norm_window = min(60, len(x))
+        x_mean = np.mean(x[-norm_window:], axis=0)
+        x_std  = np.std(x[-norm_window:], axis=0)
 
         x = (x - x_mean) / (x_std + 1e-5)
         x = np.clip(x, -self.clip, self.clip)
@@ -626,7 +686,9 @@ class KronosPredictor:
             if y_stamp.shape[0] != pred_len:
                 raise ValueError(f"y_timestamp length at index {i} should equal pred_len={pred_len}, got {y_stamp.shape[0]}.")
 
-            x_mean, x_std = np.mean(x, axis=0), np.std(x, axis=0)
+            norm_window = min(60, len(x))
+            x_mean = np.mean(x[-norm_window:], axis=0)
+            x_std  = np.std(x[-norm_window:], axis=0)
             x_norm = (x - x_mean) / (x_std + 1e-5)
             x_norm = np.clip(x_norm, -self.clip, self.clip)
 

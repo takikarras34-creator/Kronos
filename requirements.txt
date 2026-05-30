@@ -1,5 +1,7 @@
 numpy
 pandas
+scipy
+yfinance
 torch>=2.0.0
 
 einops==0.8.1
