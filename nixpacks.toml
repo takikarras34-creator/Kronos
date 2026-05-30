@@ -1,2 +1,2 @@
 [phases.install]
-cmds = ["pip install yfinance"]
+cmds = ["pip3 install yfinance"]
