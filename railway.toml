@@ -1,6 +1,5 @@
 [build]
 builder = "nixpacks"
-buildCommand = "pip3 install -r requirements-monitor.txt"
 
 [deploy]
 startCommand = "python examples/monitor_trades.py"
