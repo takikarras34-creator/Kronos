@@ -26,19 +26,17 @@ UPDATING EACH MONDAY (60 seconds)
 3. Railway auto-restarts — done.
 """
 
-import os, smtplib, time, warnings, sys
-from email.mime.text import MIMEText
-from email.mime.multipart import MIMEMultipart
+import os, time, warnings, sys
 from datetime import datetime, date
 from zoneinfo import ZoneInfo
 import yfinance as yf
+import urllib.request, urllib.error, json
 
 warnings.filterwarnings("ignore")
 
 # ── CONFIG FROM ENV VARS ──────────────────────────────────────────────────────
-EMAIL_TO     = os.environ.get("EMAIL_TO", "taki.karras34@gmail.com")
-EMAIL_FROM   = os.environ.get("EMAIL_FROM", "taki.karras34@gmail.com")
-APP_PASSWORD = os.environ.get("EMAIL_APP_PASSWORD", "")
+EMAIL_TO    = os.environ.get("EMAIL_TO", "taki.karras34@gmail.com")
+RESEND_KEY  = os.environ.get("RESEND_API_KEY", "")
 
 DANGER_BUFFER   = float(os.environ.get("DANGER_BUFFER",   "2.0"))
 CRITICAL_BUFFER = float(os.environ.get("CRITICAL_BUFFER", "1.0"))
@@ -106,21 +104,26 @@ def get_price(ticker: str) -> float | None:
 
 
 def send_email(subject: str, body: str) -> bool:
-    if not APP_PASSWORD:
-        print(f"  [EMAIL SKIPPED — EMAIL_APP_PASSWORD not set]  {subject}")
+    if not RESEND_KEY:
+        print(f"  [EMAIL SKIPPED — RESEND_API_KEY not set]  {subject}")
         return False
     try:
-        msg = MIMEMultipart("alternative")
-        msg["Subject"] = subject
-        msg["From"]    = EMAIL_FROM
-        msg["To"]      = EMAIL_TO
-        msg.attach(MIMEText(body, "plain"))
-        with smtplib.SMTP("smtp.gmail.com", 587) as server:
-            server.ehlo()
-            server.starttls()
-            server.login(EMAIL_FROM, APP_PASSWORD)
-            server.sendmail(EMAIL_FROM, EMAIL_TO, msg.as_string())
-        return True
+        payload = json.dumps({
+            "from":    "Kronos Monitor <onboarding@resend.dev>",
+            "to":      [EMAIL_TO],
+            "subject": subject,
+            "text":    body,
+        }).encode()
+        req = urllib.request.Request(
+            "https://api.resend.com/emails",
+            data=payload,
+            headers={
+                "Authorization": f"Bearer {RESEND_KEY}",
+                "Content-Type":  "application/json",
+            },
+        )
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            return resp.status == 200
     except Exception as e:
         print(f"  [EMAIL ERROR] {e}")
         return False
@@ -238,8 +241,8 @@ def run():
     print(f"  Alerts to: {EMAIL_TO}")
     print(f"  Buffers  : warning ${DANGER_BUFFER:.0f}  /  critical ${CRITICAL_BUFFER:.0f}")
     print(f"  Interval : every {CHECK_INTERVAL//60} min during market hours")
-    if not APP_PASSWORD:
-        print(f"\n  ⚠  EMAIL_APP_PASSWORD not set — alerts will log here only.")
+    if not RESEND_KEY:
+        print(f"\n  ⚠  RESEND_API_KEY not set — alerts will log here only.")
     print(f"{'='*60}\n")
 
     if os.environ.get("SEND_TEST_EMAIL", "").lower() == "true":
