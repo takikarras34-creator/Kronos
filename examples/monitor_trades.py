@@ -115,7 +115,9 @@ def send_email(subject: str, body: str) -> bool:
         msg["From"]    = EMAIL_FROM
         msg["To"]      = EMAIL_TO
         msg.attach(MIMEText(body, "plain"))
-        with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
+        with smtplib.SMTP("smtp.gmail.com", 587) as server:
+            server.ehlo()
+            server.starttls()
             server.login(EMAIL_FROM, APP_PASSWORD)
             server.sendmail(EMAIL_FROM, EMAIL_TO, msg.as_string())
         return True
